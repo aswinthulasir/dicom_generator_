@@ -746,10 +746,12 @@ def generate_session(
 
     print(f"\n  ── Session {date_fmt}  │  {modality}/{pm['plane']}  │  {n_series} series ──")
 
+    # ✅ ONE StudyInstanceUID shared by ALL series in this session
+    study_uid = generate_uid()
+
     for s in range(n_series):
         global_idx  = global_series_start + s
-        study_uid   = generate_uid()      # each series = its own study UID
-        series_uid  = generate_uid()
+        series_uid  = generate_uid()          # each series still gets its own Series UID
         series_num  = random.randint(100, 999)
 
         folder = os.path.join(
