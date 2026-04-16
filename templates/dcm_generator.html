@@ -243,8 +243,15 @@
 
         /* ─── Modality Cards ─── */
         .modality-group {
-            display: flex;
-            gap: 16px;
+            display: grid;
+            grid-template-columns: repeat(5, 1fr);
+            gap: 12px;
+        }
+        @media (max-width: 800px) {
+            .modality-group { grid-template-columns: repeat(3, 1fr); }
+        }
+        @media (max-width: 500px) {
+            .modality-group { grid-template-columns: repeat(2, 1fr); }
         }
         .modality-card {
             flex: 1;
@@ -481,13 +488,31 @@
                     <input type="radio" name="modality" value="CT" checked>
                     <div class="mod-icon">🫁</div>
                     <div class="mod-title">CT</div>
-                    <div class="mod-desc">Computed Tomography<br>Axial · Hounsfield Units</div>
+                    <div class="mod-desc">Computed Tomography<br>Axial · HU</div>
                 </label>
                 <label class="modality-card" id="mod-mr-card" onclick="selectModality('MR')">
                     <input type="radio" name="modality" value="MR">
                     <div class="mod-icon">🧲</div>
                     <div class="mod-title">MR</div>
-                    <div class="mod-desc">Magnetic Resonance<br>Sagittal · T1-weighted</div>
+                    <div class="mod-desc">Magnetic Resonance<br>Sagittal · T1</div>
+                </label>
+                <label class="modality-card" id="mod-dx-card" onclick="selectModality('DX')">
+                    <input type="radio" name="modality" value="DX">
+                    <div class="mod-icon">☢️</div>
+                    <div class="mod-title">DX</div>
+                    <div class="mod-desc">Digital X-Ray<br>PA Chest</div>
+                </label>
+                <label class="modality-card" id="mod-xa-card" onclick="selectModality('XA')">
+                    <input type="radio" name="modality" value="XA">
+                    <div class="mod-icon">💓</div>
+                    <div class="mod-title">XA</div>
+                    <div class="mod-desc">X-Ray Angiography<br>Cardiac Cath</div>
+                </label>
+                <label class="modality-card" id="mod-pt-card" onclick="selectModality('PT')">
+                    <input type="radio" name="modality" value="PT">
+                    <div class="mod-icon">⚛️</div>
+                    <div class="mod-title">PT</div>
+                    <div class="mod-desc">PET Scan<br>FDG · Axial</div>
                 </label>
             </div>
         </div>
@@ -607,10 +632,20 @@
         let pollTimer = null;
 
         /* ─── Modality Selection ─── */
+        const MODALITY_LABELS = {
+            CT: 'CT (Axial · Hounsfield)',
+            MR: 'MR (Sagittal · T1)',
+            DX: 'DX (PA Chest X-Ray)',
+            XA: 'XA (Cardiac Angiography)',
+            PT: 'PT (FDG-PET · Axial)',
+        };
+
         function selectModality(mod) {
             state.modality = mod;
-            document.getElementById('mod-ct-card').classList.toggle('selected', mod === 'CT');
-            document.getElementById('mod-mr-card').classList.toggle('selected', mod === 'MR');
+            ['CT','MR','DX','XA','PT'].forEach(m => {
+                const el = document.getElementById('mod-' + m.toLowerCase() + '-card');
+                if (el) el.classList.toggle('selected', m === mod);
+            });
             updateSummary();
         }
 
@@ -635,7 +670,7 @@
             el.innerHTML = `
                 <div class="summary-row">
                     <span class="label">Modality</span>
-                    <span class="value accent">${state.modality === 'CT' ? 'CT (Axial)' : 'MR (Sagittal T1)'}</span>
+                    <span class="value accent">${MODALITY_LABELS[state.modality] || state.modality}</span>
                 </div>
                 <hr class="summary-divider">
                 <div class="summary-row">

@@ -19,6 +19,9 @@ from custom_dcm_gen import (
     write_dicom,
     generate_ct_slice,
     generate_mr_slice,
+    generate_dx_slice,
+    generate_xa_slice,
+    generate_pt_slice,
     _PLANE_META,
     PIXEL_GENERATORS,
 )
@@ -62,7 +65,7 @@ def generate_dicoms_thread(config):
     Background thread that generates DICOM files based on user configuration.
 
     Config keys:
-        modality        : "CT" or "MR"
+        modality        : "CT", "MR", "DX", "XA", or "PT"
         num_studies     : int
         num_series      : int  (per study)
         patient_id_mode : "same" or "different"
@@ -250,8 +253,8 @@ def api_generate():
         if key not in data:
             return jsonify({"error": f"Missing required field: {key}"}), 400
 
-    if data["modality"] not in ("CT", "MR"):
-        return jsonify({"error": "Modality must be CT or MR"}), 400
+    if data["modality"] not in ("CT", "MR", "DX", "XA", "PT"):
+        return jsonify({"error": "Modality must be CT, MR, DX, XA, or PT"}), 400
 
     try:
         ns = int(data["num_studies"])

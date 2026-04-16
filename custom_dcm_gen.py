@@ -582,6 +582,364 @@ def generate_mr_slice(slice_idx: int, num_slices: int,
 
 
 # ──────────────────────────────────────────────────────────────────────────────
+# DX pixel generator – Digital Radiography (PA Chest X-Ray)
+# ──────────────────────────────────────────────────────────────────────────────
+
+def generate_dx_slice(slice_idx: int, num_slices: int,
+                      rows: int = 512, cols: int = 512) -> np.ndarray:
+    """
+    Generate a simulated PA chest radiograph.
+    Unsigned 16-bit, 0–4095 range.
+    Air = dark (low), bone = bright (high), soft tissue = mid.
+    """
+    image = np.full((rows, cols), 200, dtype=np.float32)   # background air
+    sh = (rows, cols)
+    cy, cx = rows // 2, cols // 2
+
+    # ── Body outline (soft-tissue silhouette) ────────────────────────────
+    body_ry = int(rows * 0.44)
+    body_rx = int(cols * 0.36)
+    body_mask = ellipse(sh, (cy + int(rows * 0.02), cx), (body_ry, body_rx))
+    paint(image, body_mask, 1800, noise_std=80)
+
+    # ── Lungs (dark air-filled regions) ──────────────────────────────────
+    lung_ry = int(rows * 0.28)
+    for side in (-1, 1):
+        lung_cx = cx + side * int(cols * 0.13)
+        lung_rx = int(cols * 0.12) + (3 if side == 1 else 0)
+        lung_mask = ellipse(sh, (cy - int(rows * 0.04), lung_cx),
+                            (lung_ry, lung_rx))
+        paint(image, lung_mask, 450, noise_std=60)
+        # Lung vasculature (branching bright streaks)
+        for _ in range(25):
+            vy = cy - int(rows * 0.04) + random.randint(-int(rows * 0.22), int(rows * 0.22))
+            vx = lung_cx + random.randint(-int(cols * 0.09), int(cols * 0.09))
+            vr = random.randint(2, 5)
+            paint(image, ellipse(sh, (vy, vx), (vr, vr + 1)) & lung_mask,
+                  random.randint(700, 1100), noise_std=40)
+
+    # ── Heart / mediastinum ──────────────────────────────────────────────
+    heart_ry = int(rows * 0.18)
+    heart_rx = int(cols * 0.14)
+    heart_mask = ellipse(sh, (cy + int(rows * 0.06), cx - int(cols * 0.03)),
+                         (heart_ry, heart_rx))
+    paint(image, heart_mask, 2100, noise_std=60)
+
+    # Mediastinum (central dense column)
+    med_mask = ellipse(sh, (cy - int(rows * 0.08), cx), (int(rows * 0.22), int(cols * 0.06)))
+    paint(image, med_mask, 2000, noise_std=50)
+
+    # ── Spine (bright vertical column) ───────────────────────────────────
+    spine_mask = ellipse(sh, (cy, cx), (int(rows * 0.38), int(cols * 0.035)))
+    paint(image, spine_mask & body_mask, 2800, noise_std=100)
+
+    # ── Ribs (bright arcs) ───────────────────────────────────────────────
+    for i in range(10):
+        rib_y = cy - int(rows * 0.28) + int(i * rows * 0.055)
+        for side in (-1, 1):
+            for dx in range(4):
+                rx = cx + side * (int(cols * 0.04) + dx * int(cols * 0.06))
+                rib_ry = 3 + random.randint(0, 2)
+                rib_rx = int(cols * 0.025) + random.randint(0, 5)
+                rib = ellipse(sh, (rib_y + dx * 3, rx), (rib_ry, rib_rx))
+                paint(image, rib & body_mask, 3200 + random.randint(-200, 200), noise_std=120)
+
+    # ── Clavicles ────────────────────────────────────────────────────────
+    clav_y = cy - int(rows * 0.32)
+    for side in (-1, 1):
+        for seg in range(5):
+            cx_seg = cx + side * (int(cols * 0.02) + seg * int(cols * 0.06))
+            clav = ellipse(sh, (clav_y + seg * 2, cx_seg), (3, int(cols * 0.028)))
+            paint(image, clav & body_mask, 3400, noise_std=150)
+
+    # ── Diaphragm (bright dome below lungs) ──────────────────────────────
+    dia_y = cy + int(rows * 0.18)
+    dia_mask = ellipse(sh, (dia_y, cx), (int(rows * 0.06), int(cols * 0.30)))
+    paint(image, dia_mask & body_mask, 2200, noise_std=80)
+
+    # ── Shoulder outlines ────────────────────────────────────────────────
+    for side in (-1, 1):
+        sh_cx = cx + side * int(cols * 0.32)
+        sh_mask = ellipse(sh, (cy - int(rows * 0.30), sh_cx),
+                          (int(rows * 0.10), int(cols * 0.10)))
+        paint(image, sh_mask, 2600, noise_std=100)
+
+    image[~body_mask] = 150 + np.random.normal(0, 20, image.shape)[~body_mask]
+    image = gaussian_filter(image, sigma=1.2)
+    image = np.clip(image, 0, 4095)
+    return image.astype(np.uint16)
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# XA pixel generator – X-Ray Angiography (Cardiac Catheterization)
+# ──────────────────────────────────────────────────────────────────────────────
+
+def generate_xa_slice(slice_idx: int, num_slices: int,
+                      rows: int = 512, cols: int = 512) -> np.ndarray:
+    """
+    Generate a simulated cardiac angiography frame.
+    Dark background, contrast-filled vessels bright.
+    Unsigned 16-bit, 0–4095 range.
+    """
+    image = np.full((rows, cols), 300, dtype=np.float32)   # dark background
+    sh = (rows, cols)
+    cy, cx = rows // 2, cols // 2
+
+    # Vary frame slightly with slice index for multi-frame look
+    phase = slice_idx / max(num_slices - 1, 1)
+    heartbeat = 0.8 + 0.2 * np.sin(2 * np.pi * phase)     # cardiac pulsation
+
+    # ── Background soft-tissue / ribs (faint) ────────────────────────────
+    body_mask = ellipse(sh, (cy, cx), (int(rows * 0.42), int(cols * 0.38)))
+    paint(image, body_mask, 600, noise_std=50)
+
+    # Faint rib shadows
+    for i in range(7):
+        rib_y = cy - int(rows * 0.25) + int(i * rows * 0.07)
+        for side in (-1, 1):
+            for seg in range(3):
+                rx = cx + side * (int(cols * 0.06) + seg * int(cols * 0.08))
+                rib = ellipse(sh, (rib_y + seg * 2, rx), (2, int(cols * 0.03)))
+                paint(image, rib & body_mask, 850, noise_std=60)
+
+    # Faint spine
+    spine = ellipse(sh, (cy, cx + int(cols * 0.02)), (int(rows * 0.35), int(cols * 0.03)))
+    paint(image, spine & body_mask, 900, noise_std=40)
+
+    # ── Heart silhouette ─────────────────────────────────────────────────
+    h_ry = int(rows * 0.18 * heartbeat)
+    h_rx = int(cols * 0.16 * heartbeat)
+    heart_mask = ellipse(sh, (cy + int(rows * 0.02), cx - int(cols * 0.02)),
+                         (h_ry, h_rx))
+    paint(image, heart_mask, 750, noise_std=35)
+
+    # ── Catheter path (bright line from femoral to heart) ────────────────
+    cath_points = [
+        (cy + int(rows * 0.40), cx + int(cols * 0.15)),
+        (cy + int(rows * 0.25), cx + int(cols * 0.10)),
+        (cy + int(rows * 0.10), cx + int(cols * 0.05)),
+        (cy, cx),
+    ]
+    for i in range(len(cath_points) - 1):
+        y1, x1 = cath_points[i]
+        y2, x2 = cath_points[i + 1]
+        steps = max(abs(y2 - y1), abs(x2 - x1), 1)
+        for t in range(steps):
+            py = int(y1 + (y2 - y1) * t / steps)
+            px = int(x1 + (x2 - x1) * t / steps)
+            cath = ellipse(sh, (py, px), (2, 2))
+            paint(image, cath & body_mask, 3200, noise_std=80)
+
+    # ── Coronary arteries (contrast-filled, bright) ──────────────────────
+    # Left main → LAD
+    lad_start_y = cy - int(rows * 0.02)
+    lad_start_x = cx + int(cols * 0.02)
+    for seg in range(18):
+        dy = int(seg * rows * 0.018)
+        dx = int(seg * cols * 0.008 * np.sin(seg * 0.5))
+        vy = lad_start_y + dy
+        vx = lad_start_x - int(cols * 0.04) - dx
+        vr = max(4 - seg // 5, 1)
+        v_mask = ellipse(sh, (vy, vx), (vr, vr + 1))
+        paint(image, v_mask & body_mask, 3500 - seg * 30, noise_std=60)
+
+    # Left circumflex (LCx)
+    lcx_start_y = cy + int(rows * 0.01)
+    lcx_start_x = cx + int(cols * 0.04)
+    for seg in range(14):
+        dy = int(seg * rows * 0.012)
+        dx = int(seg * cols * 0.015)
+        vy = lcx_start_y + dy
+        vx = lcx_start_x + dx
+        vr = max(3 - seg // 5, 1)
+        v_mask = ellipse(sh, (vy, vx), (vr, vr))
+        paint(image, v_mask & body_mask, 3300 - seg * 25, noise_std=55)
+
+    # Right coronary artery (RCA)
+    rca_start_y = cy - int(rows * 0.04)
+    rca_start_x = cx - int(cols * 0.06)
+    for seg in range(16):
+        dy = int(seg * rows * 0.016)
+        dx = -int(seg * cols * 0.006 * np.cos(seg * 0.4))
+        vy = rca_start_y + dy
+        vx = rca_start_x + dx
+        vr = max(3 - seg // 6, 1)
+        v_mask = ellipse(sh, (vy, vx), (vr, vr + 1))
+        paint(image, v_mask & body_mask, 3400 - seg * 28, noise_std=65)
+
+    # ── Aortic root (bright contrast pool) ───────────────────────────────
+    aorta_mask = ellipse(sh, (cy - int(rows * 0.06), cx),
+                         (int(rows * 0.04), int(cols * 0.035)))
+    paint(image, aorta_mask & body_mask, 3600, noise_std=80)
+
+    image[~body_mask] = 200 + np.random.normal(0, 15, image.shape)[~body_mask]
+    image = gaussian_filter(image, sigma=0.8)
+    image = np.clip(image, 0, 4095)
+    return image.astype(np.uint16)
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# PT pixel generator – Positron Emission Tomography (FDG-PET, Axial)
+# ──────────────────────────────────────────────────────────────────────────────
+
+def generate_pt_slice(slice_idx: int, num_slices: int,
+                      rows: int = 512, cols: int = 512) -> np.ndarray:
+    """
+    Generate a simulated FDG-PET axial slice.
+    Shows physiological tracer uptake: brain, heart, liver, kidneys, bladder.
+    Unsigned 16-bit, 0–10000 range (SUV-proportional).
+    """
+    image = np.full((rows, cols), 50, dtype=np.float32)   # air = near-zero
+    sh = (rows, cols)
+    pos = slice_idx / max(num_slices - 1, 1)    # 0=head, 1=pelvis
+    cy, cx = rows // 2, cols // 2
+
+    # ── Body outline (low-level background uptake) ───────────────────────
+    if pos < 0.15:
+        bry, brx = int(rows * 0.22), int(cols * 0.20)
+    elif pos < 0.50:
+        bry, brx = int(rows * 0.28), int(cols * 0.24)
+    elif pos < 0.75:
+        bry, brx = int(rows * 0.30), int(cols * 0.26)
+    else:
+        bry, brx = int(rows * 0.28), int(cols * 0.25)
+
+    body_mask = ellipse(sh, (cy, cx), (bry, brx))
+    paint(image, body_mask, 800, noise_std=120)   # low background uptake
+
+    # ── Region-specific uptake based on slice position ────────────────────
+
+    # HEAD region (brain – very high FDG uptake)
+    if pos < 0.15:
+        t = pos / 0.15
+        brain_ry = int(rows * (0.15 + 0.05 * t))
+        brain_rx = int(cols * (0.14 + 0.04 * t))
+        brain_mask = ellipse(sh, (cy, cx), (brain_ry, brain_rx))
+        paint(image, brain_mask & body_mask, 7500, noise_std=400)
+        # Gray matter ring (higher than white matter)
+        gm_ring = brain_mask & ~ellipse(sh, (cy, cx),
+                                         (brain_ry - int(rows * 0.03),
+                                          brain_rx - int(rows * 0.03)))
+        paint(image, gm_ring & body_mask, 9000, noise_std=350)
+        # Eyes (moderate uptake hotspots)
+        for side in (-1, 1):
+            eye = ellipse(sh, (cy - int(rows * 0.06), cx + side * int(cols * 0.07)),
+                          (int(rows * 0.025), int(cols * 0.02)))
+            paint(image, eye & body_mask, 4000, noise_std=200)
+
+    # THORAX region
+    elif pos < 0.50:
+        t = (pos - 0.15) / 0.35
+
+        # Lungs – very LOW uptake (air-filled)
+        for side in (-1, 1):
+            lung_cx = cx + side * int(cols * 0.12)
+            lung_mask = ellipse(sh, (cy - int(rows * 0.02), lung_cx),
+                                (int(rows * 0.16), int(cols * 0.09)))
+            paint(image, lung_mask & body_mask, 300, noise_std=50)
+
+        # Heart (myocardium) – very high uptake
+        if t > 0.25:
+            h_size = min((t - 0.25) / 0.5, 1.0)
+            h_ry = int(rows * 0.10 * h_size)
+            h_rx = int(cols * 0.09 * h_size)
+            if h_ry > 5:
+                h_cy = cy + int(rows * 0.04)
+                h_cx = cx - int(cols * 0.03)
+                heart = ellipse(sh, (h_cy, h_cx), (h_ry, h_rx))
+                paint(image, heart & body_mask, 8500, noise_std=500)
+                # LV cavity (blood pool – lower uptake)
+                lv = ellipse(sh, (h_cy, h_cx),
+                             (int(h_ry * 0.5), int(h_rx * 0.45)))
+                paint(image, lv & body_mask, 3000, noise_std=200)
+
+        # Mediastinum (moderate uptake)
+        med = ellipse(sh, (cy - int(rows * 0.04), cx),
+                      (int(rows * 0.12), int(cols * 0.04)))
+        paint(image, med & body_mask, 1800, noise_std=150)
+
+    # ABDOMEN region
+    elif pos < 0.75:
+        t = (pos - 0.50) / 0.25
+
+        # Liver – moderate-to-high uptake
+        liv_cx = cx + int(cols * 0.08)
+        liv_cy = cy + int(rows * 0.02)
+        liver = ellipse(sh, (liv_cy, liv_cx),
+                        (int(rows * 0.14), int(cols * 0.13)))
+        paint(image, liver & body_mask, 4500, noise_std=300)
+
+        # Spleen – moderate uptake
+        spl_cx = cx - int(cols * 0.13)
+        spl = ellipse(sh, (cy - int(rows * 0.02), spl_cx),
+                      (int(rows * 0.07), int(cols * 0.055)))
+        paint(image, spl & body_mask, 3500, noise_std=250)
+
+        # Kidneys – high uptake (renal excretion)
+        if t > 0.3:
+            for side in (-1, 1):
+                k_cx = cx + side * int(cols * 0.12)
+                k_cy = cy + int(rows * 0.04)
+                kidney = ellipse(sh, (k_cy, k_cx),
+                                 (int(rows * 0.065), int(cols * 0.04)))
+                paint(image, kidney & body_mask, 6500, noise_std=400)
+                # Renal pelvis (very hot)
+                pelvis = ellipse(sh, (k_cy, k_cx),
+                                 (int(rows * 0.025), int(cols * 0.015)))
+                paint(image, pelvis & body_mask, 8000, noise_std=300)
+
+        # Bowel loops (variable, some uptake)
+        for _ in range(6):
+            by = cy + random.randint(-int(rows * 0.08), int(rows * 0.08))
+            bx = cx + random.randint(-int(cols * 0.10), int(cols * 0.06))
+            bowel = ellipse(sh, (by, bx),
+                            (random.randint(8, 16), random.randint(6, 14)))
+            paint(image, bowel & body_mask,
+                  random.randint(1200, 2500), noise_std=180)
+
+    # PELVIS region
+    else:
+        t = (pos - 0.75) / 0.25
+
+        # Bladder – VERY high uptake (urinary excretion)
+        bl_ry = int(rows * (0.10 - 0.03 * t))
+        bl_rx = int(cols * (0.09 - 0.02 * t))
+        if bl_ry > 8:
+            bladder = ellipse(sh, (cy - int(rows * 0.04), cx), (bl_ry, bl_rx))
+            paint(image, bladder & body_mask, 9500, noise_std=400)
+            # Urine in center (even hotter)
+            urine = ellipse(sh, (cy - int(rows * 0.04), cx),
+                            (int(bl_ry * 0.7), int(bl_rx * 0.7)))
+            paint(image, urine & body_mask, 10000, noise_std=300)
+
+        # Iliac bone marrow (moderate uptake)
+        for side in (-1, 1):
+            il_cx = cx + side * int(cols * 0.14)
+            il = ellipse(sh, (cy + int(rows * 0.03), il_cx),
+                         (int(rows * 0.08), int(cols * 0.07)))
+            paint(image, il & body_mask, 2200, noise_std=200)
+
+        # Rectum (faint)
+        rect = ellipse(sh, (cy + int(rows * 0.06), cx),
+                       (int(rows * 0.04), int(cols * 0.035)))
+        paint(image, rect & body_mask, 1800, noise_std=200)
+
+    # ── Spine (moderate marrow uptake throughout) ────────────────────────
+    sp_cy = cy + int(bry * 0.55)
+    sp_r = int(rows * 0.035)
+    spine = ellipse(sh, (sp_cy, cx), (sp_r, sp_r))
+    paint(image, spine & body_mask, 2500, noise_std=200)
+
+    image[~body_mask] = 50 + np.random.normal(0, 15, image.shape)[~body_mask]
+    image = gaussian_filter(image, sigma=1.5)
+    image[~body_mask] = np.clip(
+        50 + np.random.normal(0, 10, image.shape)[~body_mask], 0, 200
+    )
+    image = np.clip(image, 0, 10000)
+    return image.astype(np.uint16)
+
+
+# ──────────────────────────────────────────────────────────────────────────────
 # Image-plane metadata per modality
 # ──────────────────────────────────────────────────────────────────────────────
 _PLANE_META = {
@@ -605,11 +963,44 @@ _PLANE_META = {
         "wc":            512,
         "ww":            800,
     },
+    "DX": {
+        "orientation":   [1, 0, 0,  0, 1, 0],
+        "pixel_spacing": [0.139, 0.139],
+        "plane":         "PA",
+        "body_part":     "CHEST",
+        "sop_class":     "1.2.840.10008.5.1.4.1.1.1.1",
+        "pixel_rep":     0,
+        "wc":            2048,
+        "ww":            4096,
+    },
+    "XA": {
+        "orientation":   [1, 0, 0,  0, 1, 0],
+        "pixel_spacing": [0.3, 0.3],
+        "plane":         "CARDIAC",
+        "body_part":     "HEART",
+        "sop_class":     "1.2.840.10008.5.1.4.1.1.12.1",
+        "pixel_rep":     0,
+        "wc":            2048,
+        "ww":            4096,
+    },
+    "PT": {
+        "orientation":   [1, 0, 0,  0, 1, 0],
+        "pixel_spacing": [4.0728, 4.0728],
+        "plane":         "AXIAL",
+        "body_part":     "WHOLEBODY",
+        "sop_class":     "1.2.840.10008.5.1.4.1.1.128",
+        "pixel_rep":     0,
+        "wc":            5000,
+        "ww":            10000,
+    },
 }
 
 PIXEL_GENERATORS = {
     "CT": generate_ct_slice,
     "MR": generate_mr_slice,
+    "DX": generate_dx_slice,
+    "XA": generate_xa_slice,
+    "PT": generate_pt_slice,
 }
 
 
@@ -711,7 +1102,7 @@ def write_dicom(filepath, pixel_data, modality,
         ds.ExposureTime      = 750
         ds.XRayTubeCurrent   = 250
         ds.ConvolutionKernel = "B30f"
-    else:
+    elif modality == "MR":
         ds.ScanningSequence  = "SE"
         ds.SequenceVariant   = "NONE"
         ds.ScanOptions       = ""
@@ -720,6 +1111,40 @@ def write_dicom(filepath, pixel_data, modality,
         ds.EchoTime          = 14.0
         ds.FlipAngle         = 90
         ds.NumberOfAverages  = 2
+    elif modality == "DX":
+        ds.RescaleIntercept        = 0
+        ds.RescaleSlope            = 1
+        ds.RescaleType             = "US"
+        ds.KVP                     = 120
+        ds.ExposureTime            = 8
+        ds.XRayTubeCurrent         = 320
+        ds.Exposure                = 2
+        ds.DistanceSourceToDetector = 1800.0
+        ds.DistanceSourceToPatient  = 1500.0
+        ds.ViewPosition            = "PA"
+        ds.ImageLaterality         = ""
+        ds.PresentationIntentType  = "FOR PRESENTATION"
+    elif modality == "XA":
+        ds.RescaleIntercept         = 0
+        ds.RescaleSlope             = 1
+        ds.KVP                      = 80
+        ds.ExposureTime             = 5
+        ds.XRayTubeCurrent          = 600
+        ds.DistanceSourceToDetector = 1050.0
+        ds.DistanceSourceToPatient  = 750.0
+        ds.PositionerPrimaryAngle   = 30.0
+        ds.PositionerSecondaryAngle = 20.0
+    elif modality == "PT":
+        ds.RescaleIntercept       = 0
+        ds.RescaleSlope           = 1.0
+        ds.RescaleType            = "BQML"
+        ds.Units                  = "BQML"
+        ds.DecayCorrection        = "START"
+        ds.AttenuationCorrectionMethod = "measured,AC_CT"
+        ds.ReconstructionMethod   = "OSEM 3i21s"
+        ds.CorrectedImage         = ["ATTN", "SCAT", "DTIM", "RAN", "NORM"]
+        ds.NumberOfSlices         = 1
+        ds.ActualFrameDuration    = 180000
 
     pydicom.dcmwrite(filepath, ds)
 
