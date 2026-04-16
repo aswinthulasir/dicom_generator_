@@ -1,0 +1,792 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>DICOM Phantom Generator</title>
+    <meta name="description" content="Web-based DICOM phantom image generator with customizable patient ID, study UID, dates, series, and modality options.">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+    <style>
+        /* ─── Reset & Variables ─── */
+        *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+        :root {
+            --bg-primary:    #0b0e17;
+            --bg-card:       rgba(17, 22, 38, 0.85);
+            --bg-card-hover: rgba(24, 30, 52, 0.95);
+            --bg-input:      rgba(12, 16, 28, 0.9);
+            --border:        rgba(99, 130, 255, 0.12);
+            --border-focus:  rgba(99, 130, 255, 0.45);
+            --accent-1:      #6c8cff;
+            --accent-2:      #a78bfa;
+            --accent-3:      #38bdf8;
+            --gradient-1:    linear-gradient(135deg, #6c8cff 0%, #a78bfa 50%, #38bdf8 100%);
+            --gradient-glow: linear-gradient(135deg, rgba(108,140,255,0.15) 0%, rgba(167,139,250,0.1) 50%, rgba(56,189,248,0.15) 100%);
+            --text-primary:  #e8ecf4;
+            --text-secondary:#8b95af;
+            --text-muted:    #5a6380;
+            --success:       #34d399;
+            --error:         #f87171;
+            --warning:       #fbbf24;
+            --radius:        14px;
+            --radius-sm:     10px;
+            --shadow:        0 8px 32px rgba(0,0,0,0.45);
+        }
+
+        body {
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+            background: var(--bg-primary);
+            color: var(--text-primary);
+            min-height: 100vh;
+            overflow-x: hidden;
+        }
+
+        /* ─── Background Ambience ─── */
+        body::before {
+            content: '';
+            position: fixed;
+            top: -40%; left: -20%;
+            width: 80vw; height: 80vw;
+            background: radial-gradient(circle, rgba(108,140,255,0.06) 0%, transparent 70%);
+            pointer-events: none;
+            z-index: 0;
+        }
+        body::after {
+            content: '';
+            position: fixed;
+            bottom: -30%; right: -15%;
+            width: 70vw; height: 70vw;
+            background: radial-gradient(circle, rgba(167,139,250,0.05) 0%, transparent 70%);
+            pointer-events: none;
+            z-index: 0;
+        }
+
+        /* ─── Layout ─── */
+        .app-wrapper {
+            position: relative;
+            z-index: 1;
+            max-width: 960px;
+            margin: 0 auto;
+            padding: 40px 24px 60px;
+        }
+
+        /* ─── Header ─── */
+        .app-header {
+            text-align: center;
+            margin-bottom: 48px;
+        }
+        .app-header .logo-icon {
+            width: 64px; height: 64px;
+            margin-bottom: 16px;
+            background: var(--gradient-1);
+            border-radius: 18px;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 28px;
+            box-shadow: 0 4px 24px rgba(108,140,255,0.25);
+        }
+        .app-header h1 {
+            font-size: 2rem;
+            font-weight: 800;
+            background: var(--gradient-1);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+            letter-spacing: -0.5px;
+        }
+        .app-header .subtitle {
+            color: var(--text-secondary);
+            font-size: 0.95rem;
+            margin-top: 8px;
+            font-weight: 400;
+        }
+
+        /* ─── Card ─── */
+        .card {
+            background: var(--bg-card);
+            border: 1px solid var(--border);
+            border-radius: var(--radius);
+            padding: 32px;
+            backdrop-filter: blur(24px);
+            box-shadow: var(--shadow);
+            margin-bottom: 28px;
+            transition: border-color 0.3s ease;
+        }
+        .card:hover {
+            border-color: rgba(99, 130, 255, 0.22);
+        }
+        .card-title {
+            font-size: 1.1rem;
+            font-weight: 700;
+            color: var(--text-primary);
+            margin-bottom: 24px;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+        .card-title .icon {
+            width: 32px; height: 32px;
+            border-radius: 8px;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 16px;
+            flex-shrink: 0;
+        }
+        .card-title .icon.blue    { background: rgba(108,140,255,0.15); }
+        .card-title .icon.purple  { background: rgba(167,139,250,0.15); }
+        .card-title .icon.cyan    { background: rgba(56,189,248,0.15);  }
+        .card-title .icon.green   { background: rgba(52,211,153,0.15);  }
+
+        /* ─── Form Grid ─── */
+        .form-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 20px;
+        }
+        .form-grid.three-col {
+            grid-template-columns: 1fr 1fr 1fr;
+        }
+        @media (max-width: 640px) {
+            .form-grid, .form-grid.three-col { grid-template-columns: 1fr; }
+        }
+        .form-group {
+            display: flex;
+            flex-direction: column;
+        }
+        .form-group.full-width {
+            grid-column: 1 / -1;
+        }
+        .form-group label {
+            font-size: 0.8rem;
+            font-weight: 600;
+            color: var(--text-secondary);
+            text-transform: uppercase;
+            letter-spacing: 0.6px;
+            margin-bottom: 8px;
+        }
+
+        /* ─── Toggle Buttons (Same / Different) ─── */
+        .toggle-group {
+            display: flex;
+            gap: 0;
+            border-radius: var(--radius-sm);
+            overflow: hidden;
+            border: 1px solid var(--border);
+        }
+        .toggle-btn {
+            flex: 1;
+            padding: 12px 16px;
+            background: var(--bg-input);
+            color: var(--text-muted);
+            border: none;
+            font-family: inherit;
+            font-size: 0.85rem;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.25s ease;
+            position: relative;
+            text-align: center;
+        }
+        .toggle-btn:not(:last-child) {
+            border-right: 1px solid var(--border);
+        }
+        .toggle-btn:hover {
+            color: var(--text-secondary);
+            background: rgba(20, 26, 44, 0.95);
+        }
+        .toggle-btn.active {
+            background: linear-gradient(135deg, rgba(108,140,255,0.2), rgba(167,139,250,0.15));
+            color: var(--accent-1);
+            box-shadow: inset 0 0 24px rgba(108,140,255,0.08);
+        }
+        .toggle-btn.active::after {
+            content: '';
+            position: absolute;
+            bottom: 0; left: 20%; right: 20%;
+            height: 2px;
+            background: var(--gradient-1);
+            border-radius: 2px;
+        }
+
+        /* ─── Select / Input ─── */
+        select, input[type="number"] {
+            width: 100%;
+            padding: 12px 16px;
+            background: var(--bg-input);
+            border: 1px solid var(--border);
+            border-radius: var(--radius-sm);
+            color: var(--text-primary);
+            font-family: inherit;
+            font-size: 0.9rem;
+            font-weight: 500;
+            transition: all 0.25s ease;
+            outline: none;
+            appearance: none;
+            -webkit-appearance: none;
+        }
+        select {
+            background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath fill='%236c8cff' d='M6 8L1 3h10z'/%3E%3C/svg%3E");
+            background-repeat: no-repeat;
+            background-position: right 14px center;
+            padding-right: 40px;
+        }
+        select:focus, input[type="number"]:focus {
+            border-color: var(--border-focus);
+            box-shadow: 0 0 0 3px rgba(108,140,255,0.1);
+        }
+        input[type="number"]::-webkit-inner-spin-button,
+        input[type="number"]::-webkit-outer-spin-button {
+            opacity: 0.5;
+        }
+
+        /* ─── Modality Cards ─── */
+        .modality-group {
+            display: flex;
+            gap: 16px;
+        }
+        .modality-card {
+            flex: 1;
+            padding: 20px;
+            background: var(--bg-input);
+            border: 2px solid var(--border);
+            border-radius: var(--radius-sm);
+            cursor: pointer;
+            transition: all 0.3s ease;
+            text-align: center;
+            position: relative;
+            overflow: hidden;
+        }
+        .modality-card:hover {
+            border-color: rgba(99, 130, 255, 0.3);
+            transform: translateY(-2px);
+        }
+        .modality-card.selected {
+            border-color: var(--accent-1);
+            background: linear-gradient(135deg, rgba(108,140,255,0.12), rgba(167,139,250,0.08));
+            box-shadow: 0 4px 20px rgba(108,140,255,0.15);
+        }
+        .modality-card .mod-icon {
+            font-size: 2rem;
+            margin-bottom: 8px;
+        }
+        .modality-card .mod-title {
+            font-size: 1rem;
+            font-weight: 700;
+            color: var(--text-primary);
+        }
+        .modality-card .mod-desc {
+            font-size: 0.75rem;
+            color: var(--text-muted);
+            margin-top: 4px;
+            line-height: 1.4;
+        }
+        .modality-card.selected .mod-title {
+            color: var(--accent-1);
+        }
+        .modality-card input[type="radio"] { display: none; }
+
+        /* ─── Generate Button ─── */
+        .btn-generate {
+            width: 100%;
+            padding: 18px 32px;
+            background: var(--gradient-1);
+            color: #fff;
+            border: none;
+            border-radius: var(--radius-sm);
+            font-family: inherit;
+            font-size: 1.05rem;
+            font-weight: 700;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            letter-spacing: 0.3px;
+            position: relative;
+            overflow: hidden;
+        }
+        .btn-generate:hover:not(:disabled) {
+            transform: translateY(-2px);
+            box-shadow: 0 8px 32px rgba(108,140,255,0.35);
+        }
+        .btn-generate:active:not(:disabled) {
+            transform: translateY(0);
+        }
+        .btn-generate:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+        .btn-generate .spinner {
+            display: none;
+            width: 20px;
+            height: 20px;
+            border: 3px solid rgba(255,255,255,0.3);
+            border-top-color: #fff;
+            border-radius: 50%;
+            animation: spin 0.7s linear infinite;
+            margin-right: 10px;
+        }
+        .btn-generate.loading .spinner { display: inline-block; }
+        .btn-generate.loading { display: flex; align-items: center; justify-content: center; }
+
+        @keyframes spin { to { transform: rotate(360deg); } }
+
+        /* ─── Progress Section ─── */
+        .progress-section {
+            display: none;
+        }
+        .progress-section.active { display: block; }
+
+        .progress-bar-track {
+            width: 100%;
+            height: 8px;
+            background: rgba(108,140,255,0.1);
+            border-radius: 8px;
+            overflow: hidden;
+            margin-bottom: 12px;
+        }
+        .progress-bar-fill {
+            height: 100%;
+            width: 0%;
+            background: var(--gradient-1);
+            border-radius: 8px;
+            transition: width 0.4s ease;
+        }
+        .progress-info {
+            display: flex;
+            justify-content: space-between;
+            font-size: 0.82rem;
+            color: var(--text-secondary);
+            margin-bottom: 20px;
+        }
+        .progress-pct {
+            font-weight: 700;
+            color: var(--accent-1);
+        }
+
+        /* ─── Log Console ─── */
+        .log-console {
+            background: rgba(5, 8, 16, 0.8);
+            border: 1px solid rgba(99, 130, 255, 0.08);
+            border-radius: var(--radius-sm);
+            padding: 16px 20px;
+            max-height: 280px;
+            overflow-y: auto;
+            font-family: 'JetBrains Mono', 'Fira Code', monospace;
+            font-size: 0.78rem;
+            line-height: 1.7;
+            color: var(--text-muted);
+        }
+        .log-console::-webkit-scrollbar { width: 6px; }
+        .log-console::-webkit-scrollbar-track { background: transparent; }
+        .log-console::-webkit-scrollbar-thumb { background: rgba(108,140,255,0.2); border-radius: 3px; }
+        .log-line { white-space: pre-wrap; word-break: break-all; }
+        .log-line.success { color: var(--success); }
+        .log-line.error   { color: var(--error); }
+
+        /* ─── Result Banner ─── */
+        .result-banner {
+            display: none;
+            padding: 20px 24px;
+            border-radius: var(--radius-sm);
+            margin-top: 20px;
+            font-weight: 600;
+            font-size: 0.9rem;
+            align-items: center;
+            gap: 12px;
+        }
+        .result-banner.show { display: flex; }
+        .result-banner.success {
+            background: rgba(52,211,153,0.1);
+            border: 1px solid rgba(52,211,153,0.25);
+            color: var(--success);
+        }
+        .result-banner.error {
+            background: rgba(248,113,113,0.1);
+            border: 1px solid rgba(248,113,113,0.25);
+            color: var(--error);
+        }
+        .result-banner .result-icon { font-size: 1.3rem; }
+        .result-banner .result-path {
+            font-weight: 400;
+            font-size: 0.8rem;
+            color: var(--text-secondary);
+            display: block;
+            margin-top: 4px;
+            word-break: break-all;
+        }
+
+        /* ─── Summary Preview Card ─── */
+        .summary-preview {
+            background: var(--gradient-glow);
+            border: 1px solid var(--border);
+            border-radius: var(--radius-sm);
+            padding: 20px 24px;
+            margin-top: 8px;
+        }
+        .summary-row {
+            display: flex;
+            justify-content: space-between;
+            padding: 6px 0;
+            font-size: 0.85rem;
+        }
+        .summary-row .label { color: var(--text-muted); font-weight: 500; }
+        .summary-row .value { color: var(--text-primary); font-weight: 600; }
+        .summary-row .value.accent { color: var(--accent-1); }
+        .summary-divider {
+            border: none;
+            border-top: 1px solid var(--border);
+            margin: 8px 0;
+        }
+
+        /* ─── Animations ─── */
+        .fade-in {
+            animation: fadeIn 0.5s ease forwards;
+        }
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(12px); }
+            to   { opacity: 1; transform: translateY(0); }
+        }
+        .card { animation: fadeIn 0.6s ease forwards; }
+        .card:nth-child(2) { animation-delay: 0.1s; }
+        .card:nth-child(3) { animation-delay: 0.2s; }
+
+        /* ─── Footer ─── */
+        .app-footer {
+            text-align: center;
+            color: var(--text-muted);
+            font-size: 0.75rem;
+            margin-top: 40px;
+            padding-top: 24px;
+            border-top: 1px solid var(--border);
+        }
+    </style>
+</head>
+<body>
+    <div class="app-wrapper">
+        <!-- Header -->
+        <header class="app-header">
+            <div class="logo-icon">🩻</div>
+            <h1>DICOM Phantom Generator</h1>
+            <p class="subtitle">Configure and generate custom DICOM phantom studies with flexible metadata combinations</p>
+        </header>
+
+        <!-- Modality Selection -->
+        <div class="card" id="card-modality">
+            <div class="card-title">
+                <span class="icon blue">📡</span>
+                Imaging Modality
+            </div>
+            <div class="modality-group">
+                <label class="modality-card selected" id="mod-ct-card" onclick="selectModality('CT')">
+                    <input type="radio" name="modality" value="CT" checked>
+                    <div class="mod-icon">🫁</div>
+                    <div class="mod-title">CT</div>
+                    <div class="mod-desc">Computed Tomography<br>Axial · Hounsfield Units</div>
+                </label>
+                <label class="modality-card" id="mod-mr-card" onclick="selectModality('MR')">
+                    <input type="radio" name="modality" value="MR">
+                    <div class="mod-icon">🧲</div>
+                    <div class="mod-title">MR</div>
+                    <div class="mod-desc">Magnetic Resonance<br>Sagittal · T1-weighted</div>
+                </label>
+            </div>
+        </div>
+
+        <!-- DICOM Metadata Configuration -->
+        <div class="card" id="card-metadata">
+            <div class="card-title">
+                <span class="icon purple">🏷️</span>
+                DICOM Metadata Configuration
+            </div>
+            <div class="form-grid three-col">
+                <!-- Patient ID -->
+                <div class="form-group">
+                    <label>Patient ID</label>
+                    <div class="toggle-group" id="toggle-patient-id">
+                        <button type="button" class="toggle-btn active" data-value="same" onclick="setToggle('patient_id', 'same', this)">Same</button>
+                        <button type="button" class="toggle-btn" data-value="different" onclick="setToggle('patient_id', 'different', this)">Different</button>
+                    </div>
+                </div>
+
+                <!-- Study Instance UID -->
+                <div class="form-group">
+                    <label>Study Instance UID</label>
+                    <div class="toggle-group" id="toggle-study-uid">
+                        <button type="button" class="toggle-btn" data-value="same" onclick="setToggle('study_uid', 'same', this)">Same</button>
+                        <button type="button" class="toggle-btn active" data-value="different" onclick="setToggle('study_uid', 'different', this)">Different</button>
+                    </div>
+                </div>
+
+                <!-- Date -->
+                <div class="form-group">
+                    <label>Study Date</label>
+                    <div class="toggle-group" id="toggle-date">
+                        <button type="button" class="toggle-btn" data-value="same" onclick="setToggle('date', 'same', this)">Same</button>
+                        <button type="button" class="toggle-btn active" data-value="different" onclick="setToggle('date', 'different', this)">Different</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Study & Series Count -->
+        <div class="card" id="card-counts">
+            <div class="card-title">
+                <span class="icon cyan">📊</span>
+                Study & Series Configuration
+            </div>
+            <div class="form-grid three-col">
+                <div class="form-group">
+                    <label>Number of Studies</label>
+                    <input type="number" id="num-studies" min="1" max="20" value="2" oninput="updateSummary()">
+                </div>
+                <div class="form-group">
+                    <label>Series per Study</label>
+                    <input type="number" id="num-series" min="1" max="20" value="3" oninput="updateSummary()">
+                </div>
+                <div class="form-group">
+                    <label>Slices per Series</label>
+                    <input type="number" id="slices-per-series" min="1" max="100" value="12" oninput="updateSummary()">
+                </div>
+            </div>
+        </div>
+
+        <!-- Summary Preview -->
+        <div class="card" id="card-summary">
+            <div class="card-title">
+                <span class="icon green">📋</span>
+                Generation Summary
+            </div>
+            <div class="summary-preview" id="summary-preview">
+                <!-- Populated by JS -->
+            </div>
+
+            <!-- Generate Button -->
+            <button class="btn-generate" id="btn-generate" onclick="startGeneration()" style="margin-top: 24px;">
+                <span class="spinner"></span>
+                <span class="btn-text">Generate DICOM Files</span>
+            </button>
+        </div>
+
+        <!-- Progress Section -->
+        <div class="card progress-section" id="progress-section">
+            <div class="card-title">
+                <span class="icon blue">⏳</span>
+                Generation Progress
+            </div>
+            <div class="progress-bar-track">
+                <div class="progress-bar-fill" id="progress-fill"></div>
+            </div>
+            <div class="progress-info">
+                <span id="progress-message">Initializing...</span>
+                <span class="progress-pct" id="progress-pct">0%</span>
+            </div>
+            <div class="log-console" id="log-console"></div>
+            <div class="result-banner" id="result-banner">
+                <span class="result-icon"></span>
+                <div>
+                    <span class="result-text"></span>
+                    <span class="result-path"></span>
+                </div>
+            </div>
+        </div>
+
+        <footer class="app-footer">
+            DICOM Phantom Generator &middot; Powered by pydicom &middot; Body phantoms with realistic anatomy
+        </footer>
+    </div>
+
+    <script>
+        /* ─── State ─── */
+        const state = {
+            modality: 'CT',
+            patient_id_mode: 'same',
+            study_uid_mode: 'different',
+            date_mode: 'different',
+        };
+
+        let pollTimer = null;
+
+        /* ─── Modality Selection ─── */
+        function selectModality(mod) {
+            state.modality = mod;
+            document.getElementById('mod-ct-card').classList.toggle('selected', mod === 'CT');
+            document.getElementById('mod-mr-card').classList.toggle('selected', mod === 'MR');
+            updateSummary();
+        }
+
+        /* ─── Toggle Buttons ─── */
+        function setToggle(field, value, btn) {
+            state[field + '_mode'] = value;
+            const group = btn.parentElement;
+            group.querySelectorAll('.toggle-btn').forEach(b => b.classList.remove('active'));
+            btn.classList.add('active');
+            updateSummary();
+        }
+
+        /* ─── Summary Update ─── */
+        function updateSummary() {
+            const nStudies = parseInt(document.getElementById('num-studies').value) || 1;
+            const nSeries  = parseInt(document.getElementById('num-series').value)  || 1;
+            const nSlices  = parseInt(document.getElementById('slices-per-series').value) || 12;
+            const totalSeries = nStudies * nSeries;
+            const totalFiles  = totalSeries * nSlices;
+
+            const el = document.getElementById('summary-preview');
+            el.innerHTML = `
+                <div class="summary-row">
+                    <span class="label">Modality</span>
+                    <span class="value accent">${state.modality === 'CT' ? 'CT (Axial)' : 'MR (Sagittal T1)'}</span>
+                </div>
+                <hr class="summary-divider">
+                <div class="summary-row">
+                    <span class="label">Patient ID</span>
+                    <span class="value">${state.patient_id_mode === 'same' ? '🔗 Same across all studies' : '🔀 Different per study'}</span>
+                </div>
+                <div class="summary-row">
+                    <span class="label">Study Instance UID</span>
+                    <span class="value">${state.study_uid_mode === 'same' ? '🔗 Same across all studies' : '🔀 Different per study'}</span>
+                </div>
+                <div class="summary-row">
+                    <span class="label">Study Date</span>
+                    <span class="value">${state.date_mode === 'same' ? '🔗 Same for all studies' : '🔀 Different per study'}</span>
+                </div>
+                <hr class="summary-divider">
+                <div class="summary-row">
+                    <span class="label">Studies</span>
+                    <span class="value accent">${nStudies}</span>
+                </div>
+                <div class="summary-row">
+                    <span class="label">Series per Study</span>
+                    <span class="value accent">${nSeries}</span>
+                </div>
+                <div class="summary-row">
+                    <span class="label">Slices per Series</span>
+                    <span class="value">${nSlices}</span>
+                </div>
+                <hr class="summary-divider">
+                <div class="summary-row">
+                    <span class="label">Total Series</span>
+                    <span class="value" style="color: var(--accent-3);">${totalSeries}</span>
+                </div>
+                <div class="summary-row">
+                    <span class="label">Total DICOM Files</span>
+                    <span class="value" style="color: var(--warning);">${totalFiles.toLocaleString()}</span>
+                </div>
+            `;
+        }
+
+        /* ─── Start Generation ─── */
+        async function startGeneration() {
+            const btn = document.getElementById('btn-generate');
+            btn.disabled = true;
+            btn.classList.add('loading');
+            btn.querySelector('.btn-text').textContent = 'Generating...';
+
+            // Show progress
+            const progressSection = document.getElementById('progress-section');
+            progressSection.classList.add('active');
+            document.getElementById('log-console').innerHTML = '';
+            document.getElementById('progress-fill').style.width = '0%';
+            document.getElementById('progress-pct').textContent = '0%';
+            document.getElementById('progress-message').textContent = 'Initializing...';
+            const resultBanner = document.getElementById('result-banner');
+            resultBanner.classList.remove('show', 'success', 'error');
+
+            const payload = {
+                modality:          state.modality,
+                num_studies:       parseInt(document.getElementById('num-studies').value) || 1,
+                num_series:        parseInt(document.getElementById('num-series').value)  || 1,
+                patient_id_mode:   state.patient_id_mode,
+                study_uid_mode:    state.study_uid_mode,
+                date_mode:         state.date_mode,
+                slices_per_series: parseInt(document.getElementById('slices-per-series').value) || 12,
+            };
+
+            try {
+                const resp = await fetch('/api/generate', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload),
+                });
+
+                if (!resp.ok) {
+                    const err = await resp.json();
+                    throw new Error(err.error || 'Failed to start generation');
+                }
+
+                // Start polling
+                pollProgress();
+            } catch (e) {
+                showResult('error', e.message);
+                btn.disabled = false;
+                btn.classList.remove('loading');
+                btn.querySelector('.btn-text').textContent = 'Generate DICOM Files';
+            }
+        }
+
+        /* ─── Poll Progress ─── */
+        function pollProgress() {
+            if (pollTimer) clearInterval(pollTimer);
+            pollTimer = setInterval(async () => {
+                try {
+                    const resp = await fetch('/api/status');
+                    const data = await resp.json();
+
+                    // Update progress bar
+                    const pct = data.total > 0 ? Math.round((data.progress / data.total) * 100) : 0;
+                    document.getElementById('progress-fill').style.width = pct + '%';
+                    document.getElementById('progress-pct').textContent = pct + '%';
+                    document.getElementById('progress-message').textContent = data.message || 'Processing...';
+
+                    // Update log
+                    const logEl = document.getElementById('log-console');
+                    logEl.innerHTML = data.log.map(line => {
+                        let cls = '';
+                        if (line.includes('Done!')) cls = 'success';
+                        if (line.includes('ERROR')) cls = 'error';
+                        return `<div class="log-line ${cls}">${escapeHtml(line)}</div>`;
+                    }).join('');
+                    logEl.scrollTop = logEl.scrollHeight;
+
+                    if (data.done) {
+                        clearInterval(pollTimer);
+                        pollTimer = null;
+
+                        const btn = document.getElementById('btn-generate');
+                        btn.disabled = false;
+                        btn.classList.remove('loading');
+                        btn.querySelector('.btn-text').textContent = 'Generate DICOM Files';
+
+                        if (data.error) {
+                            showResult('error', data.error);
+                        } else {
+                            showResult('success', 'Generation complete!', data.output_dir);
+                        }
+                    }
+                } catch (e) {
+                    console.error('Poll error:', e);
+                }
+            }, 500);
+        }
+
+        /* ─── Show Result ─── */
+        function showResult(type, message, path) {
+            const banner = document.getElementById('result-banner');
+            banner.className = 'result-banner show ' + type;
+            banner.querySelector('.result-icon').textContent = type === 'success' ? '✅' : '❌';
+            banner.querySelector('.result-text').textContent = message;
+            banner.querySelector('.result-path').textContent = path || '';
+        }
+
+        /* ─── Escape HTML ─── */
+        function escapeHtml(text) {
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
+        }
+
+        /* ─── Init ─── */
+        updateSummary();
+    </script>
+</body>
+</html>
