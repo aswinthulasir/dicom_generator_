@@ -1,11 +1,10 @@
 """
-Longitudinal DICOM Phantom Generator – PATIENT 2
+DICOM Phantom Generator – MULTI PATIENT
 =================================================
 • User selects modality: CT (axial) or MR (sagittal T1)
-• Fixed study dates:
-      Session A  –  2026-04-01  →  3 series
-      Session B  –  2026-04-08  →  6 series
-• Both sessions share the SAME Patient ID and Patient Name = PATIENT 2
+• Fixed study dates (5 series, 1 per patient per day):
+      2026-04-01 to 2026-04-05
+• All series have DIFFERENT Patient IDs, DIFFERENT StudyInstanceUIDs, and DIFFERENT Dates
 
 Usage:
     pip install pydicom numpy scipy
@@ -71,16 +70,24 @@ MR_SIG = dict(
 )
 
 # ──────────────────────────────────────────────────────────────────────────────
-# Fixed study schedule for PATIENT 2
+# Study schedule: 4 studies, 1 patient, paired series UIDs
 # ──────────────────────────────────────────────────────────────────────────────
-STUDY_SCHEDULE = [
-    # (StudyDate YYYYMMDD,  StudyTime HHMMSS,  num_series_in_this_session)
-    ("20260401", "090000", 3),   # April 1 2026  – morning session  – 3 series
-    ("20260408", "143000", 6),   # April 8 2026  – afternoon session – 6 series
-]
+# Study pair A (studies 1 & 2): 3 series each, shared SeriesInstanceUIDs
+# Study pair B (studies 3 & 4): 4 series each, shared SeriesInstanceUIDs
+# All 4 studies share the SAME PatientID but have DIFFERENT StudyInstanceUIDs
+# and DIFFERENT dates.
+# ──────────────────────────────────────────────────────────────────────────────
 
-PATIENT_NAME = "PATIENT 2"
-PATIENT_ID   = "PAT-200001"     # fixed so it is identical across all runs
+PATIENT_ID   = "PAT-200001"
+PATIENT_NAME = "PHANTOM^PATIENT"
+
+STUDY_SCHEDULE = [
+    # (StudyDate,    StudyTime,  n_series,  pair_group)
+    ("20260401", "090000", 3, "A"),   # Study 1  – pair A
+    ("20260403", "100000", 3, "A"),   # Study 2  – pair A  (same 3 series UIDs)
+    ("20260405", "090000", 4, "B"),   # Study 3  – pair B
+    ("20260407", "100000", 4, "B"),   # Study 4  – pair B  (same 4 series UIDs)
+]
 
 # ──────────────────────────────────────────────────────────────────────────────
 # Geometry helpers
@@ -718,45 +725,48 @@ def write_dicom(filepath, pixel_data, modality,
 
 
 # ──────────────────────────────────────────────────────────────────────────────
-# Per-session generator  (one date → N series)
+# Per-session generator  (one study → N series, with pre-generated UIDs)
 # ──────────────────────────────────────────────────────────────────────────────
 
 def generate_session(
-    modality:        str,
-    study_date:      str,
-    study_time:      str,
-    n_series:        int,
-    global_series_start: int,   # 1-based offset for display labels
-    total_series:    int,
-    patient_id:      str,
-    patient_name:    str,
-    output_dir:      str,
-    image_size:      int   = 512,
-    slices_per_series: int = 12,
-    slice_thickness: float = 5.0,
+    modality:           str,
+    study_date:         str,
+    study_time:         str,
+    n_series:           int,
+    series_uids:        list,       # pre-generated SeriesInstanceUIDs
+    global_series_start: int,
+    total_series:       int,
+    patient_id:         str,
+    patient_name:       str,
+    study_label:        str,        # e.g. "Study 1 (Pair A)"
+    output_dir:         str,
+    image_size:         int   = 512,
+    slices_per_series:  int   = 12,
+    slice_thickness:    float = 5.0,
 ):
     """
-    Write `n_series` DICOM series for a single (date, modality) session.
-    All series in a session share the same StudyDate but have distinct
-    StudyInstanceUIDs and SeriesInstanceUIDs so viewers list them separately.
+    Write `n_series` DICOM series for a single study using pre-generated
+    SeriesInstanceUIDs so that paired studies can share the same series UIDs.
     """
     pm       = _PLANE_META[modality]
     date_fmt = f"{study_date[:4]}-{study_date[4:6]}-{study_date[6:]}"
     gen      = PIXEL_GENERATORS[modality]
 
-    print(f"\n  ── Session {date_fmt}  │  {modality}/{pm['plane']}  │  {n_series} series ──")
-
-    # ✅ ONE StudyInstanceUID shared by ALL series in this session
     study_uid = generate_uid()
 
+    print(f"\n  ── {study_label}  │  {date_fmt}  │  {modality}/{pm['plane']}"
+          f"  │  {n_series} series ──")
+    print(f"     StudyInstanceUID : {study_uid}")
+
     for s in range(n_series):
-        global_idx  = global_series_start + s
-        series_uid  = generate_uid()          # each series still gets its own Series UID
-        series_num  = random.randint(100, 999)
+        global_idx = global_series_start + s
+        series_uid = series_uids[s]
+        series_num = random.randint(100, 999)
 
         folder = os.path.join(
             output_dir,
-            f"Series_{global_idx:02d}_{modality}_{pm['plane']}"
+            f"Study_{study_label.replace(' ', '_').replace('(', '').replace(')', '')}"
+            f"_Series_{s + 1:02d}_{modality}_{pm['plane']}"
             f"_{date_fmt}_S{series_num}"
         )
         os.makedirs(folder, exist_ok=True)
@@ -765,6 +775,7 @@ def generate_session(
               f"  {modality}/{pm['plane']}"
               f"  │  {date_fmt}"
               f"  │  SerNum={series_num}"
+              f"  │  SeriesUID=...{series_uid[-12:]}"
               f"  │  {slices_per_series} slices")
 
         for sl in range(slices_per_series):
@@ -818,15 +829,14 @@ MODALITY_INFO = {
 def print_banner():
     print()
     print("╔══════════════════════════════════════════════════════════════╗")
-    print("║   DICOM Phantom Generator – PATIENT 2  │  Longitudinal     ║")
+    print("║   DICOM Phantom Generator – 4 STUDIES / 1 PATIENT         ║")
     print("╚══════════════════════════════════════════════════════════════╝")
     print()
-    print(f"  Patient Name : {PATIENT_NAME}")
-    print(f"  Patient ID   : {PATIENT_ID}")
-    print()
-    print("  Study schedule (fixed):")
-    print("    Session A  →  2026-04-01  │  3 series")
-    print("    Session B  →  2026-04-08  │  6 series")
+    print("  Layout:")
+    print("    • 1 patient  (same PatientID for all studies)")
+    print("    • Pair A – Study 1 & 2:  3 series each, shared SeriesInstanceUIDs")
+    print("    • Pair B – Study 3 & 4:  4 series each, shared SeriesInstanceUIDs")
+    print("    • Each study has a DIFFERENT StudyInstanceUID and date")
     print()
 
 
@@ -874,40 +884,69 @@ def create_patient2_study(
     slice_thickness:   float = 5.0,
 ):
     """
-    Generate all series for PATIENT 2 in the chosen modality.
+    Generate 4 studies for ONE patient in the chosen modality.
 
-    Fixed schedule
-    ──────────────
-      2026-04-01  →  3 series   (Series 01 – 03)
-      2026-04-08  →  6 series   (Series 04 – 09)
+    Layout
+    ──────
+      Pair A  (Studies 1 & 2):
+        - 3 series per study
+        - SAME SeriesInstanceUIDs across both studies (shared)
+        - DIFFERENT StudyInstanceUIDs and dates
 
-    All 9 series share PatientID = PAT-200001, PatientName = PATIENT 2.
-    Each series has its own StudyInstanceUID + StudyDate so viewers
-    display them as separate dated studies under one patient.
+      Pair B  (Studies 3 & 4):
+        - 4 series per study
+        - SAME SeriesInstanceUIDs across both studies (shared)
+        - DIFFERENT StudyInstanceUIDs and dates
+
+      All 4 studies share the SAME PatientID.
     """
     os.makedirs(output_dir, exist_ok=True)
 
-    total_series = sum(n for _, _, n in STUDY_SCHEDULE)
+    # Pre-generate shared SeriesInstanceUIDs for each pair
+    pair_a_series_uids = [generate_uid() for _ in range(3)]   # 3 series shared
+    pair_b_series_uids = [generate_uid() for _ in range(4)]   # 4 series shared
+
+    # Map pair groups to their pre-generated series UIDs
+    pair_series_uids = {
+        "A": pair_a_series_uids,
+        "B": pair_b_series_uids,
+    }
+
+    total_series = sum(n for _, _, n, _ in STUDY_SCHEDULE)
     pm           = _PLANE_META[modality]
 
+    print(f"  Patient ID   : {PATIENT_ID}")
+    print(f"  Patient Name : {PATIENT_NAME}")
     print(f"  Modality     : {modality}  /  {pm['plane']}")
-    print(f"  Total series : {total_series}  ({' + '.join(str(n) for _, _, n in STUDY_SCHEDULE)})")
+    print(f"  Total series : {total_series}  (across 4 studies)")
     print(f"  Matrix       : {image_size} × {image_size}  │  "
           f"{slices_per_series} slices/series  │  {slice_thickness} mm thick")
     print(f"  Output dir   : {output_dir}/")
+    print()
+    print("  Pair A series UIDs (shared by Study 1 & 2):")
+    for i, uid in enumerate(pair_a_series_uids):
+        print(f"    Series {i + 1}: {uid}")
+    print("  Pair B series UIDs (shared by Study 3 & 4):")
+    for i, uid in enumerate(pair_b_series_uids):
+        print(f"    Series {i + 1}: {uid}")
     print("─" * 64)
 
     global_idx = 1
-    for study_date, study_time, n_series in STUDY_SCHEDULE:
+    for study_num, (study_date, study_time, n_series, pair_group) in enumerate(STUDY_SCHEDULE, 1):
+        study_label = f"Study {study_num} (Pair {pair_group})"
+        series_uids = pair_series_uids[pair_group]
+
         generate_session(
             modality             = modality,
             study_date           = study_date,
             study_time           = study_time,
             n_series             = n_series,
+            series_uids          = series_uids,
             global_series_start  = global_idx,
             total_series         = total_series,
             patient_id           = PATIENT_ID,
             patient_name         = PATIENT_NAME,
+            study_label          = study_label,
             output_dir           = output_dir,
             image_size           = image_size,
             slices_per_series    = slices_per_series,
@@ -918,19 +957,24 @@ def create_patient2_study(
     print()
     print("═" * 64)
     print(f"  ✓  All {total_series} {modality} series written to '{output_dir}/'")
-    print(f"     Patient Name : {PATIENT_NAME}")
-    print(f"     Patient ID   : {PATIENT_ID}")
+    print(f"     Patient: {PATIENT_NAME} ({PATIENT_ID})")
     print()
-    print("  Series layout:")
+    print("  Study layout:")
     g = 1
-    for study_date, _, n in STUDY_SCHEDULE:
+    for study_num, (study_date, _, n, pair_group) in enumerate(STUDY_SCHEDULE, 1):
         d = f"{study_date[:4]}-{study_date[4:6]}-{study_date[6:]}"
-        print(f"    {d}  →  Series {g:02d} – {g + n - 1:02d}  ({n} series)")
+        print(f"    Study {study_num} (Pair {pair_group})  │  {d}"
+              f"  →  {n} series  (global #{g:02d}–{g + n - 1:02d})")
         g += n
+    print()
+    print("  Pair A: Studies 1 & 2 share 3 SeriesInstanceUIDs")
+    print("  Pair B: Studies 3 & 4 share 4 SeriesInstanceUIDs")
     print("═" * 64)
     print()
     print("  Load the root folder in your viewer.")
-    print("  You will see ONE patient (PATIENT 2) with TWO dated studies.")
+    print("  You will see 1 patient with 4 studies (different dates).")
+    print("  Studies 1 & 2 each have 3 series with the same SeriesInstanceUIDs.")
+    print("  Studies 3 & 4 each have 4 series with the same SeriesInstanceUIDs.")
     print()
 
 
